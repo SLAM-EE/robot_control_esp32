@@ -85,7 +85,7 @@ def on_press(key):
 
 def on_release(key):
     """ sending stop signal on key release"""
-    global VL, VR
+    message = bytearray('p', 'utf-8')
     message.append(int(VL))
     message.append(int(VR))
     SOCK_.sendto(message, (UDP_IP, UDP_PORT))
