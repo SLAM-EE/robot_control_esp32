@@ -86,10 +86,6 @@ def on_press(key):
 def on_release(key):
     """ sending stop signal on key release"""
     global VL, VR
-    message = bytearray('p', 'utf-8')
-    if(key.char == 'w'):
-        VL = V_OPT
-        VR = V_OPT
     message.append(int(VL))
     message.append(int(VR))
     SOCK_.sendto(message, (UDP_IP, UDP_PORT))
@@ -111,7 +107,7 @@ if(__name__ == "__main__"):
 
     # x = threading.Thread(target=deccelerate, args=("Deccel2", 1))
     # x.start()
-    listener = keyboard.Listener(on_press=on_press, suppress=True)
+    listener = keyboard.Listener(on_press=on_press, on_release=on_release, suppress=True)
     listener.start()
 
     listener.join()
