@@ -23,9 +23,112 @@
 #include "lwip/sys.h"
 #include <lwip/netdb.h>
 
+#include "esp_attr.h"
+
+#include "driver/mcpwm.h"
+#include "soc/mcpwm_periph.h"
+
 #define PORT CONFIG_EXAMPLE_PORT
 
+#define GPIO_PWM0A_OUT 15   //Set GPIO 15 as PWM0A, LEFT MOTOR
+#define GPIO_PWM0B_OUT 16   //Set GPIO 16 as PWM0B, RIGHTT MOTOR
+
+#define GPIO_OUTPUT_IO_1    2
+#define GPIO_OUTPUT_IO_2    4
+#define GPIO_OUTPUT_IO_3    17
+#define GPIO_OUTPUT_IO_4    5
+#define GPIO_OUTPUT_PIN_SEL  ((1ULL<<GPIO_OUTPUT_IO_1) | (1ULL<<GPIO_OUTPUT_IO_2) | (1ULL<<GPIO_OUTPUT_IO_3) | (1ULL<<GPIO_OUTPUT_IO_4)) //MASK BITS
+
 static const char *TAG = "example";
+
+static void mcpwm_example_gpio_initialize(void)
+{
+    printf("initializing mcpwm gpio...\n");
+    mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM0A, GPIO_PWM0A_OUT);
+    mcpwm_gpio_init(MCPWM_UNIT_0, MCPWM0B, GPIO_PWM0B_OUT);
+}
+
+static void left_motor_duty_cycle(mcpwm_unit_t mcpwm_num, mcpwm_timer_t timer_num , float duty_cycle)
+{
+    //mcpwm_set_signal_low(mcpwm_num, timer_num, MCPWM_OPR_B);
+    mcpwm_set_duty(mcpwm_num, timer_num, MCPWM_OPR_A, duty_cycle);
+    mcpwm_set_duty_type(mcpwm_num, timer_num, MCPWM_OPR_A, MCPWM_DUTY_MODE_0); //call this each time, if operator was previously in low/high state
+}
+
+static void right_motor_duty_cycle(mcpwm_unit_t mcpwm_num, mcpwm_timer_t timer_num , float duty_cycle)
+{
+    //mcpwm_set_signal_low(mcpwm_num, timer_num, MCPWM_OPR_A);
+    mcpwm_set_duty(mcpwm_num, timer_num, MCPWM_OPR_B, duty_cycle);
+    mcpwm_set_duty_type(mcpwm_num, timer_num, MCPWM_OPR_B, MCPWM_DUTY_MODE_0);  //call this each time, if operator was previously in low/high state
+}
+
+static void left_motor_stop()
+{
+	//mcpwm_set_signal_low(mcpwm_num, timer_num, MCPWM_OPR_A);
+	gpio_set_level(GPIO_OUTPUT_IO_1, 0);
+	gpio_set_level(GPIO_OUTPUT_IO_2, 0);
+}
+
+static void right_motor_stop()
+{
+	//mcpwm_set_signal_low(mcpwm_num, timer_num, MCPWM_OPR_B);
+	gpio_set_level(GPIO_OUTPUT_IO_3, 0);
+	gpio_set_level(GPIO_OUTPUT_IO_4, 0);
+}
+
+static void both_motor_stop()
+{
+    left_motor_stop();
+    right_motor_stop();
+}
+
+static void left_motor_forward()
+{
+	gpio_set_level(GPIO_OUTPUT_IO_1, 1);
+	gpio_set_level(GPIO_OUTPUT_IO_2, 0);
+}
+
+static void left_motor_backward()
+{
+	gpio_set_level(GPIO_OUTPUT_IO_1, 0);
+	gpio_set_level(GPIO_OUTPUT_IO_2, 1);
+}
+
+static void right_motor_forward()
+{
+	gpio_set_level(GPIO_OUTPUT_IO_3, 1);
+	gpio_set_level(GPIO_OUTPUT_IO_4, 0);
+}
+
+static void right_motor_backward()
+{
+	gpio_set_level(GPIO_OUTPUT_IO_3, 0);
+	gpio_set_level(GPIO_OUTPUT_IO_4, 1);
+}
+
+static void both_motor_forward()
+{
+	left_motor_forward();
+	right_motor_forward();
+}
+
+static void both_motor_backward()
+{
+	left_motor_backward();
+	right_motor_backward();
+}
+
+static void left_turn()
+{
+	left_motor_stop();
+	right_motor_forward();
+}
+
+static void right_turn()
+{
+	left_motor_forward();
+	right_motor_stop();
+}
 
 static void udp_server_task(void *pvParameters)
 {
@@ -97,6 +200,28 @@ static void udp_server_task(void *pvParameters)
                 rx_buffer[len] = 0; // Null-terminate whatever we received and treat like a string...
                 ESP_LOGI(TAG, "Received %d bytes from %s:", len, addr_str);
                 ESP_LOGI(TAG, "%s", rx_buffer);
+                switch(rx_buffer[0])
+                {
+                //forward
+                case 'w':
+                	both_motor_forward();
+                	break;
+                case 's':
+                	both_motor_backward();
+                	break;
+                case 'd':
+                	left_turn();
+                	break;
+                case 'a':
+                	right_turn();
+                	break;
+                default:
+                	both_motor_stop();
+                	break;
+                }
+
+                left_motor_duty_cycle(MCPWM_UNIT_0, MCPWM_TIMER_0, 100);
+                right_motor_duty_cycle(MCPWM_UNIT_0, MCPWM_TIMER_0, 100);
 
                 int err = sendto(sock, rx_buffer, len, 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
                 if (err < 0) {
@@ -115,6 +240,64 @@ static void udp_server_task(void *pvParameters)
     vTaskDelete(NULL);
 }
 
+/*
+static void brushed_motor_control()
+{
+
+    while (1) {
+    	left_motor_duty_cycle(MCPWM_UNIT_0, MCPWM_TIMER_0, 80.0);
+        right_motor_duty_cycle(MCPWM_UNIT_0, MCPWM_TIMER_0, 40.0);
+
+        both_motor_forward();
+        vTaskDelay(2000 / portTICK_RATE_MS);
+        both_motor_backward();
+        vTaskDelay(2000 / portTICK_RATE_MS);
+        left_turn(MCPWM_UNIT_0, MCPWM_TIMER_0);
+        vTaskDelay(2000 / portTICK_RATE_MS);
+        right_turn(MCPWM_UNIT_0, MCPWM_TIMER_0);
+        vTaskDelay(2000 / portTICK_RATE_MS);
+        both_motor_stop(MCPWM_UNIT_0, MCPWM_TIMER_0);
+        vTaskDelay(2000 / portTICK_RATE_MS);
+
+        left_motor_duty_cycle(MCPWM_UNIT_0, MCPWM_TIMER_0, 80.0);
+        right_motor_duty_cycle(MCPWM_UNIT_0, MCPWM_TIMER_0, 40.0);
+        vTaskDelay(2000 / portTICK_RATE_MS);
+        both_motor_forward();
+        vTaskDelay(2000 / portTICK_RATE_MS);
+
+    }
+}
+*/
+
+static void motor_initialize()
+{
+		//1. mcpwm gpio initialization
+	    mcpwm_example_gpio_initialize();
+
+	    //2. initial mcpwm configuration
+	    printf("Configuring Initial Parameters of mcpwm...\n");
+	    mcpwm_config_t pwm_config;
+	    pwm_config.frequency = 1000;    //frequency = 500Hz,
+	    pwm_config.cmpr_a = 0;    //duty cycle of PWMxA = 0
+	    pwm_config.cmpr_b = 0;    //duty cycle of PWMxb = 0
+	    pwm_config.counter_mode = MCPWM_UP_COUNTER;
+	    pwm_config.duty_mode = MCPWM_DUTY_MODE_0;
+	    mcpwm_init(MCPWM_UNIT_0, MCPWM_TIMER_0, &pwm_config);    //Configure PWM0A & PWM0B with above settings
+
+	    //3. Normal gpio initialization
+	    gpio_config_t io_conf;
+	    io_conf.intr_type = GPIO_INTR_DISABLE;		//disable interrupt
+	    io_conf.mode = GPIO_MODE_OUTPUT;			//set as output mode
+	    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;	//bit mask of the pins that you want to set,e.g.GPIO18/19
+	    io_conf.pull_down_en = 0;					//disable pull-down mode
+	    io_conf.pull_up_en = 0;						//disable pull-up mode
+	    gpio_config(&io_conf);						//configure GPIO with the given settings
+
+	    left_motor_duty_cycle(MCPWM_UNIT_0, MCPWM_TIMER_0, 35.0);
+	    right_motor_duty_cycle(MCPWM_UNIT_0, MCPWM_TIMER_0, 35.0);
+
+}
+
 void app_main(void)
 {
     ESP_ERROR_CHECK(nvs_flash_init());
@@ -126,6 +309,8 @@ void app_main(void)
      * examples/protocols/README.md for more information about this function.
      */
     ESP_ERROR_CHECK(example_connect());
+
+    motor_initialize();
 
 #ifdef CONFIG_EXAMPLE_IPV4
     xTaskCreate(udp_server_task, "udp_server", 4096, (void*)AF_INET, 5, NULL);
